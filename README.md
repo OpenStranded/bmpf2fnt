@@ -2,6 +2,9 @@
 
 Convert Stranded II / Blitz3D `.bmpf` bitmap font files to BMFont `.fnt` format.
 
+[Documentation](https://docs.rs/bmpf2fnt) |
+[Crate](https://crates.io/crates/bmpf2fnt)
+
 ## Usage
 
 ```text
