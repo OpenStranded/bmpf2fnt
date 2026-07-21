@@ -94,7 +94,7 @@ pub fn build_font_atlas(
         }
     }
 
-    let line_h = bmpf.height.max(1) as u32;
+    let line_h = bmpf.tile_h.max(1) as u32;
     let base = result
         .iter()
         .filter(|g| g.h > 0)
@@ -226,7 +226,9 @@ mod tests {
                     advance: 10,
                 },
             ],
-            height: 16,
+            tile_w: 16,
+            tile_h: 16,
+            frames: 1,
         };
 
         let w = 20u32;

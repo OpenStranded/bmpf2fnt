@@ -17,17 +17,16 @@
 //! Parse `.bmpf` bitmap font files (Stranded II / Blitz3D format) and
 //! generate `.fnt` (BMFont / AngelCode text format) output.
 //!
-//! # `.bmpf` format
+//! # `.bmpf` format (reverse-engineered from Blitz3D source)
 //!
 //! ```text
 //! [46-byte ASCII header]  "Unreal Software Bitmap Font Wizard bmpf File\r\n"
-//! [optional 6-byte meta]   only present in full (256-char) fonts:
-//!   u16 LE: char_count     (256)
-//!   u16 LE: font_height    (pixels)
-//!   u16 LE: unknown
+//! u16 LE frames           Number of tiles/frames in the spritesheet
+//! u16 LE tile_w           Width of each tile in pixels
+//! u16 LE tile_h           Height of each tile in pixels (font line height)
 //! [3-byte records …]
 //!   u8:    character code
-//!   u16 LE: advance width
+//!   u16 LE: advance width (in pixels)
 //! [terminator]             00 00 00
 //! ```
 
