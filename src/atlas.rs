@@ -55,20 +55,14 @@ pub fn build_font_atlas(
     img_h: u32,
     bmpf: &BmpfFont,
 ) -> Result<FontAtlas, BmpfError> {
-    let glyphs = find_glyph_regions(bmp_rgba, img_w, img_h)?;
+    let tile_w = bmpf.tile_w as u32;
+    let tile_h = bmpf.tile_h as u32;
+    let glyphs = extract_tile_regions(bmp_rgba, img_w, img_h, tile_w, tile_h, bmpf.chars.len())?;
 
-    if glyphs.is_empty() {
-        return Err(BmpfError::NoGlyphsFound);
-    }
-
-    let mut region_index = 0usize;
     let mut result = Vec::with_capacity(bmpf.chars.len());
 
-    for bc in &bmpf.chars {
-        if region_index < glyphs.len()
-            && glyph_region_contains(&glyphs[region_index], bmp_rgba, img_w, img_h)
-        {
-            let gr = &glyphs[region_index];
+    for (i, bc) in bmpf.chars.iter().enumerate() {
+        if let Some(gr) = &glyphs[i] {
             result.push(GlyphRegion {
                 code: bc.code,
                 x_advance: bc.advance as f32,
@@ -79,7 +73,6 @@ pub fn build_font_atlas(
                 x_offset: 0,
                 y_offset: 0,
             });
-            region_index += 1;
         } else {
             result.push(GlyphRegion {
                 code: bc.code,
@@ -94,7 +87,7 @@ pub fn build_font_atlas(
         }
     }
 
-    let line_h = bmpf.tile_h.max(1) as u32;
+    let line_h = tile_h.max(1);
     let base = result
         .iter()
         .filter(|g| g.h > 0)
@@ -112,95 +105,68 @@ pub fn build_font_atlas(
     })
 }
 
-fn find_glyph_regions(rgba: &[u8], w: u32, h: u32) -> Result<Vec<GlyphBounds>, BmpfError> {
-    let w = w as usize;
-    let h = h as usize;
+/// For each tile in the grid, compute the bounding box of all non-empty
+/// pixels within that tile's area. Returns a Vec with one entry per tile
+/// (None if the tile is entirely empty).
+fn extract_tile_regions(
+    rgba: &[u8],
+    img_w: u32,
+    img_h: u32,
+    tile_w: u32,
+    tile_h: u32,
+    tile_count: usize,
+) -> Result<Vec<Option<GlyphBounds>>, BmpfError> {
+    let w = img_w as usize;
+    let h = img_h as usize;
     if rgba.len() < w * h * 4 {
         return Err(BmpfError::Io("image buffer too small".into()));
     }
 
-    let mut visited = vec![false; w * h];
-    let mut regions = Vec::new();
+    let tw = tile_w as usize;
+    let th = tile_h as usize;
+    let mut result = Vec::with_capacity(tile_count);
 
-    for y in 0..h {
-        for x in 0..w {
-            let idx = (y * w + x) * 4;
-            if visited[y * w + x] {
-                continue;
-            }
-            let r = rgba[idx];
-            let g = rgba[idx + 1];
-            let b = rgba[idx + 2];
-            let a = rgba[idx + 3];
-            if is_pixel_empty(r, g, b, a) {
-                continue;
-            }
+    for ti in 0..tile_count {
+        let tx = ti * tw;
+        if tx >= w {
+            result.push(None);
+            continue;
+        }
 
-            let mut stack = vec![(x, y)];
-            let mut min_x = x;
-            let mut max_x = x;
-            let mut min_y = y;
-            let mut max_y = y;
+        let mut min_x = w;
+        let mut max_x = 0usize;
+        let mut min_y = h;
+        let mut max_y = 0usize;
+        let mut found = false;
 
-            while let Some((cx, cy)) = stack.pop() {
-                if cx >= w || cy >= h || visited[cy * w + cx] {
-                    continue;
-                }
-                let pi = (cy * w + cx) * 4;
-                if is_pixel_empty(rgba[pi], rgba[pi + 1], rgba[pi + 2], rgba[pi + 3]) {
-                    continue;
-                }
-                visited[cy * w + cx] = true;
-                min_x = min_x.min(cx);
-                max_x = max_x.max(cx);
-                min_y = min_y.min(cy);
-                max_y = max_y.max(cy);
-
-                if cx > 0 {
-                    stack.push((cx - 1, cy));
-                }
-                if cx + 1 < w {
-                    stack.push((cx + 1, cy));
-                }
-                if cy > 0 {
-                    stack.push((cx, cy - 1));
-                }
-                if cy + 1 < h {
-                    stack.push((cx, cy + 1));
+        for dy in 0..th.min(h) {
+            for dx in 0..tw.min(w - tx) {
+                let px = tx + dx;
+                let py = dy;
+                let idx = (py * w + px) * 4;
+                if !is_pixel_empty(rgba[idx], rgba[idx + 1], rgba[idx + 2], rgba[idx + 3]) {
+                    found = true;
+                    min_x = min_x.min(px);
+                    max_x = max_x.max(px);
+                    min_y = min_y.min(py);
+                    max_y = max_y.max(py);
                 }
             }
+        }
 
-            regions.push(GlyphBounds {
+        if found {
+            result.push(Some(GlyphBounds {
                 x: min_x as u32,
                 y: min_y as u32,
                 w: (max_x - min_x + 1) as u32,
                 h: (max_y - min_y + 1) as u32,
-            });
+            }));
+        } else {
+            result.push(None);
         }
     }
 
-    regions.sort_by_key(|r| (r.y, r.x));
-    Ok(regions)
-}
-
-fn glyph_region_contains(gr: &GlyphBounds, rgba: &[u8], img_w: u32, img_h: u32) -> bool {
-    let w = img_w as usize;
-    for dy in 0..gr.h.min(img_h) {
-        for dx in 0..gr.w.min(img_w) {
-            let px = (gr.x + dx) as usize;
-            let py = (gr.y + dy) as usize;
-            if px >= img_w as usize || py >= img_h as usize {
-                continue;
-            }
-            let idx = (py * w + px) * 4;
-            if idx + 3 < rgba.len()
-                && !is_pixel_empty(rgba[idx], rgba[idx + 1], rgba[idx + 2], rgba[idx + 3])
-            {
-                return true;
-            }
-        }
-    }
-    false
+    Ok(result)
 }
 
 fn is_pixel_empty(r: u8, g: u8, b: u8, a: u8) -> bool {

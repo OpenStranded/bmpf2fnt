@@ -134,12 +134,37 @@ fn convert_one(bmp_path: &Path, font_def: &BmpfFont, out_dir: &Path) -> Result<(
     std::fs::create_dir_all(out_dir)
         .map_err(|e| BmpfError::Io(format!("cannot create output dir: {e}")))?;
 
-    let mut out_path = out_dir.to_path_buf();
-    out_path.push(format!("{stem}.fnt"));
+    // Write .fnt
+    let mut fnt_path = out_dir.to_path_buf();
+    fnt_path.push(format!("{stem}.fnt"));
+    std::fs::write(&fnt_path, &fnt_content)
+        .map_err(|e| BmpfError::Io(format!("cannot write {}: {e}", fnt_path.display())))?;
+    eprintln!("wrote {}", fnt_path.display());
 
-    std::fs::write(&out_path, &fnt_content)
-        .map_err(|e| BmpfError::Io(format!("cannot write {}: {e}", out_path.display())))?;
+    // Write .png (convert magenta→transparent, save as PNG)
+    let mut png_path = out_dir.to_path_buf();
+    png_path.push(format!("{stem}.png"));
 
-    eprintln!("wrote {}", out_path.display());
+    // Convert magenta to transparent in-place
+    let mut rgba = img.into_raw();
+    for pixel in rgba.chunks_exact_mut(4) {
+        let r = pixel[0];
+        let g = pixel[1];
+        let b = pixel[2];
+        let dr = r.abs_diff(255);
+        let dg = g.abs_diff(0);
+        let db = b.abs_diff(255);
+        if dr <= 10 && dg <= 10 && db <= 10 {
+            pixel[3] = 0; // Magenta → transparent
+        }
+    }
+    let out_img = image::RgbaImage::from_raw(w, h, rgba)
+        .ok_or_else(|| BmpfError::Io("failed to create output image".into()))?;
+
+    out_img
+        .save(&png_path)
+        .map_err(|e| BmpfError::Io(format!("cannot write {}: {e}", png_path.display())))?;
+    eprintln!("wrote {}", png_path.display());
+
     Ok(())
 }
